@@ -203,6 +203,6 @@ def test_model(model=None, overwrite=False):
 
 
 if __name__ == "__main__":
-    # model = train_model()
+    model = train_model()
     test_model(overwrite=True)
 

@@ -94,6 +94,6 @@ def get_dataset_info():
     dataset_info["gripper_bottom_row"] = 450
 
     # Seed to use to keep consistent results, can be set to None to not set a seed
-    dataset_info["random_seed"] = 42
+    dataset_info["random_seed"] = None
 
     return dataset_info

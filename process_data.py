@@ -471,7 +471,7 @@ def setup_train_and_test_data():
     np.save(dataset_info["test_data_file_names_path"], file_names_test)
 
 if __name__ == "__main__":
-    # get_ground_truth_data()
+    get_ground_truth_data()
     setup_train_and_test_data()
 
 
