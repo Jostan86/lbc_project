@@ -10,7 +10,7 @@ def get_dataset_info():
     """
 
     # Trials numbers to not use for training, mostly because they don't have valid entry/exit points
-    skip_trials = [32, 34, 30, 38, 39]
+    skip_trials = [32, 34, 30, 37, 38, 39]
 
     num_trials = 80
     num_samples_per_trial = 10
@@ -50,7 +50,7 @@ def get_dataset_info():
     dataset_info = {}
 
     # Set all the directories
-    dataset_directory = "/home/jostan/Documents/lbc_dataset4"
+    dataset_directory = "project/rob_537_data_11_28_23"
     dataset_info["dataset_directory"] = dataset_directory
     dataset_info["image_directory"] = os.path.join(dataset_directory, "images")
     dataset_info["gripper_data_directory"] = os.path.join(dataset_directory, "grip_data")
@@ -81,6 +81,9 @@ def get_dataset_info():
 
     # Max radius to use (in pixels), values greater than this will be set to this value
     dataset_info["max_radius"] = 500
+    # Min and Max polynomial coefficients
+    dataset_info["min_orig_coeff"] = [-0.0097552892118565, -4.183621247967389, -855.992176104685]
+    dataset_info["max_orig_coeff"] = [0.0077482977761286, 6.13997606911115, 714.4113543738614]
     # Column of the image that has the center of the gripper
     dataset_info["center_of_gripper_pixel"] = 292
     # Number of pixels to keep on either side of the center of the gripper for various crops

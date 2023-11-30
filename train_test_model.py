@@ -3,12 +3,12 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 import numpy as np
 import matplotlib.pyplot as plt
-from process_data import get_dataset_info
+from process_data_jostan import get_dataset_info
 import cv2
 import math
 import os
 
-def train_model():
+def train_model(epochs, lr):
     """ Trains the LSTM model and saves it. Also plots the training and validation loss."""
 
     dataset_info = get_dataset_info()
@@ -22,20 +22,30 @@ def train_model():
     # First LSTM layer
     model.add(LSTM(50, activation='relu', input_shape=(dataset_info["time_steps_to_use"], dataset_info["num_features"])))
 
-    model.add(Dense(3))  # Output layer: Predicts the radius
+    model.add(Dense(y_train.shape[1]))  # Output layer: Predicts the radius
 
-    model.compile(optimizer='adam', loss='mean_squared_error')
+    optimizer = tf.keras.optimizers.Adam(learning_rate=lr)  # Adjust the learning rate
+
+    model.compile(optimizer=optimizer, loss='mean_squared_error')
 
     # Assuming X_train and y_train are your input and output training data
-    history = model.fit(X_train, y_train, epochs=100, validation_split=0.2, batch_size=100)
+    history = model.fit(X_train, y_train, epochs=epochs, validation_split=0.2, batch_size=100)
 
-    # Plot accuracy from training history
+    # Plot loss from training history
     plt.plot(history.history['loss'], label='Training Loss')
     plt.plot(history.history['val_loss'], label='Validation Loss')
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
     plt.legend()
     plt.show()
+
+    # # Plot accuracy from training history
+    # plt.plot(history.history['accuracy'], label='Training Accuracy')
+    # plt.plot(history.history['val_accuracy'], label='Validation Accuracy')
+    # plt.xlabel('Epochs')
+    # plt.ylabel('Accuracy')
+    # plt.legend()
+    # plt.show()
 
     # save the model
     model.save(dataset_info["model_path"])
@@ -127,33 +137,82 @@ def draw_curve(image, circle_center, start_point, end_point, radius, color):
 
     return image
 
-def annotate_image_with_result(image, result, color=(0, 0, 255)):
+def draw_poly(image, start_point, end_point, poly_coeffs, color):
+    """Plots a polynomial curve over an input image.
+
+    Args:
+        image (numpy.ndarray): The image to draw the polynomial curve on.
+        start_point (tuple): The starting point of the curve as (x, y) pixel coordinates.
+        end_point (tuple): The ending point of the curve as (x, y) pixel coordinates.
+        poly_coeffs (numpy.ndarray): Coefficients of the polynomial curve.
+        color (tuple): The color of the curve.
+
+    Returns:
+        image (numpy.ndarray): The image with the drawn polynomial curve.
+    """
+
+    x_vals = np.linspace(start_point[0], end_point[0], 100)
+    y_vals = np.polyval(poly_coeffs, x_vals)
+
+    # Scale y_vals based on start_point[1] and end_point[1]
+    y_range = end_point[1] - start_point[1]
+    y_vals_scaled = ((y_vals - np.min(y_vals)) / (np.max(y_vals) - np.min(y_vals))) * y_range + start_point[1]
+
+    # Check the direction of the curve
+    if start_point[1] > end_point[1]:
+        # If the start_point is below the end_point, flip the curve
+        y_vals_scaled = end_point[1] - (y_vals_scaled - end_point[1])
+
+    # Create curve points using scaled y_vals
+    curve_points = np.column_stack((x_vals.astype(np.int32), y_vals_scaled.astype(np.int32)))
+
+    # Draw the polynomial curve on the image
+    cv2.polylines(image, [curve_points], isClosed=False, color=color, thickness=2)
+
+    return image
+
+def annotate_image_with_result(image, result, color=(0, 0, 255), segmentation_method='radius'):
 
     dataset_info = get_dataset_info()
 
     bottom_pixel = dataset_info["gripper_bottom_row"]
     max_radius = dataset_info["max_radius"]
+    min_orig_coeff = np.array(dataset_info["min_orig_coeff"])
+    max_orig_coeff = np.array(dataset_info["max_orig_coeff"])
     right_column = dataset_info["gripper_right_column"]
     left_column = dataset_info["gripper_left_column"]
 
-    # convert exits back to pixels
-    result[1:] = bottom_pixel - result[1:] * bottom_pixel
-    left_exit_row = int(result[1])
-    right_exit_row = int(result[2])
-    curve_radius_pixel = (max_radius - abs(result[0]) * max_radius) * np.sign(result[0])
-    left_exit_coords = (left_column, left_exit_row)
-    right_exit_coords = (right_column, right_exit_row)
+    if segmentation_method == 'radius':
+        # convert exits back to pixels
+        result[1:] = bottom_pixel - result[1:] * bottom_pixel
+        left_exit_row = int(result[1])
+        right_exit_row = int(result[2])
+        curve_radius_pixel = (max_radius - abs(result[0]) * max_radius) * np.sign(result[0])
+        left_exit_coords = (left_column, left_exit_row)
+        right_exit_coords = (right_column, right_exit_row)
 
-    # Draw a line along the curve
-    circle_center, curve_radius_pixel = get_circle_center(left_exit_coords, right_exit_coords, curve_radius_pixel)
-    image = draw_curve(image, circle_center, left_exit_coords, right_exit_coords, curve_radius_pixel, color)
+        # Draw a line along the curve
+        circle_center, curve_radius_pixel = get_circle_center(left_exit_coords, right_exit_coords, curve_radius_pixel)
+        image = draw_curve(image, circle_center, left_exit_coords, right_exit_coords, curve_radius_pixel, color)
+
+    if segmentation_method == 'poly':
+        # convert exits back to pixels
+        result[3:] = bottom_pixel - result[3:] * bottom_pixel
+        left_exit_row = int(result[3])
+        right_exit_row = int(result[4])
+        pixel_coeff = np.array(result[0:3]) * max_orig_coeff 
+        left_exit_coords = (left_column, left_exit_row)
+        right_exit_coords = (right_column, right_exit_row)
+
+        # Draw a line along the curve
+        image = draw_poly(image, left_exit_coords, right_exit_coords, pixel_coeff, color)
 
     # draw a dash at the right and left exit points on the image
     cv2.line(image, (right_column, right_exit_row), (right_column + 15, right_exit_row), color, 2)
     cv2.line(image, (left_column, left_exit_row), (left_column - 15, left_exit_row), color, 2)
 
 
-def test_model(model=None, overwrite=False):
+def test_model(model=None, overwrite=False, segmentation_method='radius'):
     """ Tests the model on the test data and saves the results as annotated images.
 
     Args:
@@ -191,8 +250,8 @@ def test_model(model=None, overwrite=False):
 
         image = cv2.imread(image_path)
 
-        annotate_image_with_result(image, prediction, (57, 127, 255))
-        annotate_image_with_result(image, y_test_sample, (255, 204, 52))
+        annotate_image_with_result(image, prediction, (57, 127, 255), segmentation_method)
+        annotate_image_with_result(image, y_test_sample, (255, 204, 52), segmentation_method)
 
         # save the image
         cv2.imwrite(os.path.join(results_save_path, "result_{}.png".format(image_name.split(".")[0])), image)
@@ -203,6 +262,6 @@ def test_model(model=None, overwrite=False):
 
 
 if __name__ == "__main__":
-    model = train_model()
-    test_model(overwrite=True)
+    model = train_model(epochs=750, lr=0.0001)
+    test_model(overwrite=True, segmentation_method='poly')
 

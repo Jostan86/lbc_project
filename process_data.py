@@ -24,6 +24,9 @@ class GroundTruther:
         self.captioned_image_save_directory = data_set_info["annotated_image_directory"]
 
         self.max_radius = data_set_info["max_radius"]
+        self.max_coeff = data_set_info["max_orig_coeff"]
+
+        self.x_range = (data_set_info["gripper_left_column"], data_set_info["gripper_right_column"])
 
         self.center_of_gripper_pixel = data_set_info["center_of_gripper_pixel"]
         self.center_segment_half_width = data_set_info["center_segment_half_width"]
@@ -266,6 +269,50 @@ class GroundTruther:
 
         return circle_radius
 
+    def get_poly(self, image_bgr, skeleton, image_trial=None, degree=2):
+            """Fits a polynomial to the curvature of the wire and outputs the polynomial's coefficients.
+
+            Args:
+                image_bgr (np.array, dtype=np.uint8, shape=(480, 640, 3)): image as a BGR numpy array
+                skeleton (np.array, dtype=np.bool, shape=(480, 640)): skeleton of the cable as a 2D boolean array
+                image_trial (int): trial number of the image for saving purposes
+                degree (int): degree of the polynomial to fit (default: 3)
+
+            Returns:
+                coefficients (np.array): coefficients of the fitted polynomial
+            """
+
+            skeleton_coordinates = np.where(skeleton == 1)
+            skeleton_x_coords = skeleton_coordinates[1]
+            skeleton_y_coords = skeleton_coordinates[0]
+
+            # Filter skeleton points within the specified x-range
+            x_mask = np.where((skeleton_x_coords >= self.x_range[0]) & (skeleton_x_coords <= self.x_range[1]))
+            filtered_x_coords = skeleton_x_coords[x_mask]
+            filtered_y_coords = skeleton_y_coords[x_mask]
+
+            # Fit a polynomial curve to the filtered skeleton points
+            coefficients = np.polyfit(filtered_x_coords, filtered_y_coords, degree)
+
+            # Normalize the coefficients to be between -1 and 1
+            normalized_coefficients = coefficients / self.max_coeff
+
+            # Visualize the fitted polynomial within the specified x-range (optional)
+            if self.viz:
+                fitted_curve = np.poly1d(coefficients)
+                x_values = np.linspace(self.x_range[0], self.x_range[1], 100)  # Generate x-values within the range
+                y_values = fitted_curve(x_values)  # Calculate corresponding y-values
+                
+                curve_points = np.column_stack((x_values.astype(np.int32), y_values.astype(np.int32)))
+
+                # Draw the polynomial curve on the image
+                cv2.polylines(image_bgr, [curve_points], isClosed=False, color=(255, 0, 0), thickness=2)
+                cv2.imshow("image", image_bgr)
+                cv2.waitKey(0)
+                cv2.destroyAllWindows()
+
+            return normalized_coefficients
+
     def get_enter_exit_point(self, image_bgr, image_save_prefix=None):
         """ Finds the enter and exit points of the wire. They are normalized to be between 0 and 1, where 0 is the
         bottom of the gripper and 1 is the top of the image. The bottom row of the gripper is set in the __init__ method.
@@ -366,7 +413,7 @@ class GroundTruther:
 
         return right_exit, left_exit
 
-def get_ground_truth_data():
+def get_ground_truth_data(segmentation_method='radius'):
     """ Gets the ground truth data for the radius and enter/exit points of the wire and saves it to a numpy array."""
 
     # Set this to the trial number to start at, if you want to start at the beginning set it to 0
@@ -375,9 +422,14 @@ def get_ground_truth_data():
     # Get the dataset info
     dataset_info = get_dataset_info()
 
-    ground_truth_data = np.zeros((dataset_info['total_num_samples'], 3))
+    if segmentation_method == 'radius':
+        num_gt_results = 3
+    if segmentation_method == 'poly':
+        num_gt_results = 5
 
-    ground_truther = GroundTruther(viz=False,
+    ground_truth_data = np.zeros((dataset_info['total_num_samples'], num_gt_results))
+
+    ground_truther = GroundTruther(viz=True,
                                    overwrite=True)
 
     sample_counter = 0
@@ -395,16 +447,28 @@ def get_ground_truth_data():
 
         if i % (num_samples_per_trial+1) == 0:
             skeleton = ground_truther.get_skeleton(image.copy(), image_trial_num)
-            radius = ground_truther.get_radius(image.copy(), skeleton, image_trial_num)
+
+            if segmentation_method == 'radius':
+                radius = ground_truther.get_radius(image.copy(), skeleton, image_trial_num)
+            if segmentation_method == 'poly':
+                poly_coeffs = ground_truther.get_poly(image.copy(), skeleton, image_trial_num)   
+            
             sample_counter = 0
         else:
             image_save_prefix = image_file_name.split('.')[0]
             right_exit, left_exit = ground_truther.get_enter_exit_point(image.copy(), image_save_prefix)
             trial_num_corrected = image_trial_num - len([i for i in dataset_info['skip_trials'] if i < image_trial_num])
             idx = trial_num_corrected * 10 + sample_counter
-            ground_truth_data[idx, 0] = radius
-            ground_truth_data[idx, 1] = left_exit
-            ground_truth_data[idx, 2] = right_exit
+            if segmentation_method == 'radius':
+                ground_truth_data[idx, 0] = radius
+                ground_truth_data[idx, 1] = left_exit
+                ground_truth_data[idx, 2] = right_exit
+            if segmentation_method == 'poly':
+                ground_truth_data[idx, 0] = poly_coeffs[0]
+                ground_truth_data[idx, 1] = poly_coeffs[1]
+                ground_truth_data[idx, 2] = poly_coeffs[2]
+                ground_truth_data[idx, 3] = left_exit
+                ground_truth_data[idx, 4] = right_exit
             sample_counter += 1
 
     np.save(dataset_info["ground_truth_data_path"], ground_truth_data)
@@ -413,7 +477,10 @@ def get_ground_truth_data():
     grip_data_file_names = np.array(dataset_info['gripper_file_names'])
     grip_data_file_names = np.array([file_name.split('.')[0] for file_name in grip_data_file_names])
     ground_truth_data = np.hstack((grip_data_file_names.reshape(-1, 1), ground_truth_data))
-    ground_truth_data = pd.DataFrame(ground_truth_data, columns=['file_name', 'radius', 'left_exit', 'right_exit'])
+    if segmentation_method == 'radius':
+        ground_truth_data = pd.DataFrame(ground_truth_data, columns=['file_name', 'radius', 'left_exit', 'right_exit'])
+    if segmentation_method == 'poly':
+        ground_truth_data = pd.DataFrame(ground_truth_data, columns=['file_name', 'poly_coeff_1', 'poly_coeff_2', 'poly_coeff_3', 'left_exit', 'right_exit'])
     csv_file_path = dataset_info["ground_truth_data_path"].split('.')[0] + '.csv'
     ground_truth_data.to_csv(csv_file_path, index=False)
 
@@ -471,7 +538,7 @@ def setup_train_and_test_data():
     np.save(dataset_info["test_data_file_names_path"], file_names_test)
 
 if __name__ == "__main__":
-    get_ground_truth_data()
+    get_ground_truth_data(segmentation_method='poly')
     setup_train_and_test_data()
 
 
