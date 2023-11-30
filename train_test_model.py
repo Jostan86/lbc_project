@@ -3,7 +3,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 import numpy as np
 import matplotlib.pyplot as plt
-from process_data_jostan import get_dataset_info
+from process_data import get_dataset_info
 import cv2
 import math
 import os
