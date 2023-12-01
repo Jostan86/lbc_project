@@ -16,17 +16,17 @@ def get_dataset_info():
     num_samples_per_trial = 10
     num_features = 139
 
-    # # Set features to not use here
-    # # non_feature_columns1 = ['0_incontact_{}'.format(i) for i in range(8)]
-    # non_feature_columns2 = ['0_slipstate_{}'.format(i) for i in range(8)]
-    # # non_feature_columns3 = ['1_incontact_{}'.format(i) for i in range(8)]
-    # non_feature_columns4 = ['1_slipstate_{}'.format(i) for i in range(8)]
-    # non_feature_columns5 = ['0_friction_est', '1_friction_est', '0_target_grip_force', '0_is_ref_loaded',
-    #                         '0_is_sd_active', '1_target_grip_force', '1_is_ref_loaded',
-    #                         '1_is_sd_active']
-    #
-    # non_feature_columns = non_feature_columns2 + non_feature_columns4 + non_feature_columns5
-    non_feature_columns = []
+    # Set features to not use here
+    # non_feature_columns1 = ['0_incontact_{}'.format(i) for i in range(8)]
+    non_feature_columns2 = ['0_slipstate_{}'.format(i) for i in range(8)]
+    # non_feature_columns3 = ['1_incontact_{}'.format(i) for i in range(8)]
+    non_feature_columns4 = ['1_slipstate_{}'.format(i) for i in range(8)]
+    non_feature_columns5 = ['0_friction_est', '1_friction_est', '0_target_grip_force', '0_is_ref_loaded',
+                            '0_is_sd_active', '1_target_grip_force', '1_is_ref_loaded',
+                            '1_is_sd_active']
+
+    non_feature_columns = non_feature_columns2 + non_feature_columns4 + non_feature_columns5
+    # non_feature_columns = []
 
     num_features -= len(non_feature_columns)
 
@@ -50,7 +50,8 @@ def get_dataset_info():
     dataset_info = {}
 
     # Set all the directories
-    dataset_directory = "/home/jostan/Documents/lbc_dataset4"
+    dataset_directory = "/home/jostan/Documents/lbc_datasets/lbc_dataset4"
+    package_directory = "/home/jostan/catkin_ws/src/pkgs_noetic/course_pkgs/lbc/lbc_project/model_data"
     dataset_info["dataset_directory"] = dataset_directory
     dataset_info["image_directory"] = os.path.join(dataset_directory, "images")
     dataset_info["gripper_data_directory"] = os.path.join(dataset_directory, "grip_data")
@@ -61,7 +62,7 @@ def get_dataset_info():
     dataset_info["X_test_path"] = os.path.join(dataset_directory, "X_test.npy")
     dataset_info["y_test_path"] = os.path.join(dataset_directory, "y_test.npy")
     dataset_info["test_data_file_names_path"] = os.path.join(dataset_directory, "test_data_file_names.npy")
-    dataset_info["model_path"] = os.path.join(dataset_directory, "lstm_model.h5")
+    dataset_info["model_path"] = os.path.join(package_directory, "lstm_model.h5")
 
     # Lists of image and gripper file names that will be used for training
     dataset_info["image_names"] = image_names
@@ -92,6 +93,10 @@ def get_dataset_info():
     dataset_info["gripper_right_column"] = 351
     dataset_info["gripper_left_column"] = 228
     dataset_info["gripper_bottom_row"] = 450
+    dataset_info["pixels_per_mm"] = 4.05
+    dataset_info["gripper_center_row"] = 375
+
+    dataset_info["move_distance"] = 15 # mm
 
     # Seed to use to keep consistent results, can be set to None to not set a seed
     dataset_info["random_seed"] = None
