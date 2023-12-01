@@ -9,12 +9,14 @@ from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras import layers
 import numpy as np
 import math
+import pandas as pd
+import pickle
+from sklearn.preprocessing import MinMaxScaler
 
 class MoveServer:
     def __init__(self):
         rospy.init_node('move_server')
         self.dataset_info = get_dataset_info()
-        self.move_data_service = rospy.Service('gripper_move_data', MoveData, self.get_move_data_service)
         self.model = tf.keras.models.load_model(self.dataset_info["model_path"])
 
         self.gripper_bottom_row = self.dataset_info["gripper_bottom_row"]
@@ -30,14 +32,57 @@ class MoveServer:
         self.move_distance = move_distance * self.dataset_info["pixels_per_mm"]
 
         self.move_right = True
+        # Load the saved scaler
+        with open('/home/jostan/catkin_ws/src/pkgs_noetic/course_pkgs/lbc/lbc_project/src/scaler.pkl', 'rb') as file:
+            self.scaler = pickle.load(file)
+
+        self.move_data_service = rospy.Service('gripper_move_data', MoveData, self.return_move_data)
+
+        # Normalize new data
+        # new_og_shape = (1, self.num_time_steps, self.num_features)
+        # new_reshaped_data = X_new.reshape(-1, X_new.shape[-1])
+        # normalized_new_data = self.scaler.transform(new_reshaped_data)
+        # X_new_normalized = normalized_new_data.reshape(new_og_shape)
+
 
         rospy.spin()
 
-    def get_move_data_service(self, request):
+    def load_data_service(self, request):
+
+
+        path_to_data = "/home/jostan/Documents/lbc_datasets/lbc_dataset4/grip_data/0_0.csv"
+
+        gripper_data = pd.read_csv(path_to_data)
+
+        # Extract the last 30 rows and drop non-feature columns if necessary
+        x_data = gripper_data.iloc[-self.dataset_info['time_steps_to_use']:].drop(columns=self.dataset_info['non_feature_columns']).values
+
+        x_data = self.scaler.transform(x_data)
+
+        return self.return_move_data(x_data)
+
+    def receive_data_service(self, request):
 
         x_data = request.gripper_data
         self.move_right = request.move_right
-        x_data = np.array(x_data).reshape(1, self.num_time_steps, self.num_features)
+        x_data = np.array(x_data).reshape(1, self.num_time_steps, self.num_features)[0]
+        return self.return_move_data(x_data)
+
+    def return_move_data(self, request):
+
+        # path_to_data = "/home/jostan/Documents/lbc_datasets/lbc_dataset4/grip_data/0_0.csv"
+        #
+        # gripper_data = pd.read_csv(path_to_data)
+        #
+        # # Extract the last 30 rows and drop non-feature columns if necessary
+        # x_data = gripper_data.iloc[-self.dataset_info['time_steps_to_use']:].drop(
+        #     columns=self.dataset_info['non_feature_columns']).values
+
+        x_data = request.gripper_data
+
+        x_data = np.array(x_data).reshape(self.num_time_steps, self.num_features)
+
+        x_data = self.scaler.transform(x_data).reshape(1, self.num_time_steps, self.num_features)
 
         prediction = self.model.predict(x_data)[0]
         prediction[1:] = self.gripper_bottom_row - prediction[1:] * self.gripper_bottom_row

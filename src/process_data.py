@@ -6,6 +6,7 @@ from skimage.morphology import medial_axis, remove_small_objects
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 from dataset_info import get_dataset_info
+import pickle
 
 class GroundTruther:
     """ Class for generating ground truth data for the radius and enter/exit points of the wire."""
@@ -441,6 +442,10 @@ def setup_train_and_test_data():
     scaler = MinMaxScaler()
     normalized_data = scaler.fit_transform(reshaped_data)
     X_train = normalized_data.reshape(og_shape)
+
+    # Save the fitted scaler
+    with open('scaler.pkl', 'wb') as file:
+        pickle.dump(scaler, file)
 
     # get the ground truth data
     y_train = np.load(dataset_info["ground_truth_data_path"])
