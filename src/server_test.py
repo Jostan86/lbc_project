@@ -13,36 +13,25 @@ dataset_info = get_dataset_info()
 num_features = dataset_info["num_features"]
 num_time_steps = dataset_info["time_steps_to_use"]
 
-x_data = np.load(dataset_info["X_test_path"])
-y_data = np.load(dataset_info["y_test_path"])
-file_paths = np.load(dataset_info["test_data_file_names_path"])
-print(num_features * num_time_steps)
-test_num = 1
-x_data = x_data[test_num].reshape(num_time_steps * num_features)
-y_data = y_data[test_num]
-file_path = file_paths[test_num]
+test_data_file_paths = np.load(dataset_info["val_data_file_names_path"])
+for i in range(test_data_file_paths.shape[0]):
+    file_path = test_data_file_paths[i]
+    trial_num = float(file_path.split("_")[0])
+    sample_num = float(file_path.split("_")[1])
+    print("Trial: {}, Sample: {}".format(trial_num, sample_num))
+    request = MoveDataRequest()
+    # request.gripper_data = x_data
+    request.gripper_data = [trial_num, sample_num]
+    request.move_right = False
 
-path_to_data = "/home/jostan/Documents/lbc_datasets/lbc_dataset4/grip_data/0_0.csv"
+    response = server_connection(request)
 
-gripper_data = pd.read_csv(path_to_data)
+    # print("Actual: {}".format(y_data))
+    # print("Predicted: {}".format(response.move_data))
+    print("response: x: {}, y: {}, angle: {}".format(response.x, response.y, response.angle))
+    # print("File path: {}".format(file_path))
 
-# Extract the last 30 rows and drop non-feature columns if necessary
-x_data = gripper_data.iloc[-dataset_info['time_steps_to_use']:].drop(
-    columns=dataset_info['non_feature_columns']).values
-
-x_data = x_data.reshape(num_time_steps * num_features)
-x_data = x_data.astype(np.float32).tolist()
-request = MoveDataRequest()
-# request.gripper_data = x_data
-request.gripper_data = x_data
-request.move_right = True
-
-response = server_connection(request)
-
-print("Actual: {}".format(y_data))
-# print("Predicted: {}".format(response.move_data))
-print("response: x: {}, y: {}, angle: {}".format(response.x, response.y, response.angle))
-print("File path: {}".format(file_path))
+    waiting = input("Press enter to continue")
 
 
 

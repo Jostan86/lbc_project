@@ -1,7 +1,8 @@
+import keras.models
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
-from tensorflow.keras import layers
+from keras.callbacks import ModelCheckpoint
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -9,38 +10,49 @@ from process_data import get_dataset_info
 import cv2
 import math
 import os
+from process_results import ResultsProcessor
+from process_data import setup_train_and_val_data
+import json
+import csv
+import pandas as pd
 
-def train_model():
+def train_model(num_epochs, dataset_info):
     """ Trains the LSTM model and saves it. Also plots the training and validation loss."""
 
-    dataset_info = get_dataset_info()
 
     X_train = np.load(dataset_info["X_train_path"])
     y_train = np.load(dataset_info["y_train_path"])
+    X_val = np.load(dataset_info["X_val_path"])
+    y_val = np.load(dataset_info["y_val_path"])
 
     # Define the LSTM model with multiple layers
     model = Sequential()
 
     # First LSTM layer
-    model.add(LSTM(50, activation='relu', input_shape=(dataset_info["time_steps_to_use"], dataset_info["num_features"])))
+    model.add(LSTM(dataset_info["num_units"],
+                   activation=dataset_info["activation_function"],
+                   input_shape=(dataset_info["time_steps_to_use"], dataset_info["num_features"]),
+                   # return_sequences=False,
+                   # recurrent_dropout=0.2
+                   ))
 
     model.add(Dense(3))  # Output layer: Predicts the radius
 
-    model.compile(optimizer='adam', loss='mean_squared_error')
-
-    # shuffle the data
-    indices = np.arange(X_train.shape[0])
-    np.random.shuffle(indices)
-    X_train = X_train[indices]
-    y_train = y_train[indices]
-
+    model.compile(optimizer=dataset_info["optimizer"], loss=dataset_info["loss_function"])
 
     # Assuming X_train and y_train are your input and output training data
-    history = model.fit(X_train, y_train, epochs=100, validation_split=0.1)
+    history = model.fit(X_train,
+                        y_train,
+                        epochs=num_epochs,
+                        validation_data=(X_val, y_val),
+                        batch_size=dataset_info["batch_size"]
+                        )
 
     # Plot accuracy from training history
     plt.plot(history.history['loss'], label='Training Loss')
-    plt.plot(history.history['val_loss'], label='Validation Loss')
+    # check if validation loss is in history
+    if "val_loss" in history.history:
+        plt.plot(history.history['val_loss'], label='Validation Loss')
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
     plt.legend()
@@ -48,133 +60,10 @@ def train_model():
 
     # save the model
     model.save(dataset_info["model_path"])
+    # return the model and the plot and the final training and validation loss
+    return model, plt, history.history['loss'], history.history['val_loss']
 
-    return model
-
-def get_circle_center(left_point, right_point, radius):
-    """ Finds the center of a circle given two points on the circle and the radius.
-
-    Args:
-        left_point (tuple): The starting point of the curve.
-        right_point (tuple): The ending point of the curve.
-        radius (float): The radius of the curve.
-
-    Returns:
-        circle_center (tuple): The center of the circle as (x, y) pixel coordinates.
-    """
-
-    # Calculate the midpoint
-    midpoint = ((left_point[0] + right_point[0]) / 2, (left_point[1] + right_point[1]) / 2)
-
-    # Distance between start and end points
-    dx, dy = right_point[0] - left_point[0], right_point[1] - left_point[1]
-    connecting_dist = math.sqrt(dx ** 2 + dy ** 2)
-    points_to_center_dist = connecting_dist / 2
-    dx_mid, dy_mid = dx / 2, dy / 2
-
-    # Distance from midpoint to circle center
-    if connecting_dist / 2 > abs(radius):
-        print("The radius is too small for the given points, manually setting")
-        radius = connecting_dist / 2 * np.sign(radius)
-    mid_to_center_dist = math.sqrt(radius ** 2 - (connecting_dist / 2) ** 2)
-
-    # if dx > 0:
-    center_x1 = midpoint[0] + mid_to_center_dist * dy_mid / points_to_center_dist
-    center_y1 = midpoint[1] - mid_to_center_dist * dx_mid / points_to_center_dist
-    center_x2 = midpoint[0] - mid_to_center_dist * dy_mid / points_to_center_dist
-    center_y2 = midpoint[1] + mid_to_center_dist * dx_mid / points_to_center_dist
-
-    if radius > 0:
-        center_x = center_x1
-        center_y = center_y1
-    else:
-        center_x = center_x2
-        center_y = center_y2
-
-    return (center_x, center_y), radius
-
-def draw_curve(image, circle_center, left_point, right_point, radius, color):
-    """ Draws a curve on an image given the center and radius of the circle.
-
-    Args:
-        image (numpy.ndarray, dtype=uint8, shape=(480, 640, 3)): The image to draw the curve on.
-        circle_center (tuple): The center of the circle as (x, y) pixel coordinates.
-        start_point (tuple): The starting point of the curve as (x, y) pixel coordinates.
-        end_point (tuple): The ending point of the curve as (x, y) pixel coordinates.
-        radius (float): The radius of the curve.
-        color (tuple): The color of the curve.
-
-    Returns:
-        image (numpy.ndarray, dtype=uint8, shape=(480, 640, 3)): The image with the drawn curve.
-    """
-
-    # Determine the start and end angles for the arc
-    left_angle = math.degrees(math.atan2(left_point[1] - circle_center[1], left_point[0] - circle_center[0]))
-    right_angle = math.degrees(math.atan2(right_point[1] - circle_center[1], right_point[0] - circle_center[0]))
-
-    # if distance between angles is over 180, switch the angles
-    switch_angles = False
-    if abs(left_angle - right_angle) > 175:
-        switch_angles = True
-
-    if switch_angles:
-        # add 360 to start or end angle, whichever is negative
-        if left_angle < 0:
-            left_angle += 360
-        else:
-            right_angle += 360
-
-
-    # Draw the arc
-    cv2.ellipse(image,
-                (int(circle_center[0]), int(circle_center[1])),
-                (int(abs(radius)), int(abs(radius))),
-                0,
-                right_angle,
-                left_angle,
-                color,
-                2)
-
-    return image
-
-def annotate_image_with_result(image, result, color=(0, 0, 255)):
-
-    dataset_info = get_dataset_info()
-
-    bottom_pixel = dataset_info["gripper_bottom_row"]
-    max_radius = dataset_info["max_radius"]
-    right_column = dataset_info["gripper_right_column"]
-    left_column = dataset_info["gripper_left_column"]
-
-    # convert exits back to pixels
-    result[1:] = bottom_pixel - result[1:] * bottom_pixel
-    left_exit_row = int(result[1])
-    right_exit_row = int(result[2])
-    curve_radius_pixel = (max_radius - abs(result[0]) * max_radius) * np.sign(result[0])
-    left_exit_coords = (left_column, left_exit_row)
-    right_exit_coords = (right_column, right_exit_row)
-
-    # Draw a line along the curve
-    circle_center, curve_radius_pixel = get_circle_center(left_exit_coords, right_exit_coords, curve_radius_pixel)
-    image = draw_curve(image, circle_center, left_exit_coords, right_exit_coords, curve_radius_pixel, color)
-
-    # draw a dash at the right and left exit points on the image
-    cv2.line(image, (right_column, right_exit_row), (right_column + 15, right_exit_row), color, 2)
-    cv2.line(image, (left_column, left_exit_row), (left_column - 15, left_exit_row), color, 2)
-
-    arc_length = 80
-
-    destination, destination_angle = get_move_destination(left_exit_coords, right_exit_coords, curve_radius_pixel,
-                                                     arc_length,
-                                        move_right=True)
-    cv2.circle(image, (int(destination[0]), int(destination[1])), 5, color, -1)
-
-    print(get_move_data(left_exit_coords, right_exit_coords, curve_radius_pixel, arc_length, dataset_info,
-                        move_right=True))
-
-import math
-
-def test_model(model=None, overwrite=False):
+def test_model(model=None, overwrite=False, results_save_path=None, verbose=False):
     """ Tests the model on the test data and saves the results as annotated images.
 
     Args:
@@ -183,129 +72,197 @@ def test_model(model=None, overwrite=False):
     """
 
     dataset_info = get_dataset_info()
+    results_processor = ResultsProcessor(model)
 
-    results_save_path = os.path.join(dataset_info["dataset_directory"], "results2")
+    if results_save_path is None:
+        results_save_path = os.path.join(dataset_info["dataset_directory"], "results2")
 
-    if not os.path.exists(results_save_path):
-        raise ValueError("The results directory does not exist.")
+        if not os.path.exists(results_save_path):
+            raise ValueError("The results directory does not exist.")
 
-    if not overwrite and os.listdir(results_save_path) != []:
-        raise ValueError("The results directory is not empty, set overwrite to True to overwrite the directory.")
-    else:
-        for file in os.listdir(results_save_path):
-            os.remove(os.path.join(results_save_path, file))
+        if not overwrite and os.listdir(results_save_path) != []:
+            raise ValueError("The results directory is not empty, set overwrite to True to overwrite the directory.")
+        else:
+            for file in os.listdir(results_save_path):
+                os.remove(os.path.join(results_save_path, file))
 
-    if model is None:
-        model = tf.keras.models.load_model(dataset_info["model_path"])
 
-    X_test = np.load(dataset_info["X_test_path"])
-    y_test = np.load(dataset_info["y_test_path"])
-    file_names_test = np.load(dataset_info["test_data_file_names_path"])
+    X_test = np.load(dataset_info["X_val_path"])
+    y_test = np.load(dataset_info["y_val_path"])
+    file_names_test = np.load(dataset_info["val_data_file_names_path"])
+    # X_test = np.load(dataset_info["X_train_path"])
+    # y_test = np.load(dataset_info["y_train_path"])
+    # file_names_test = np.load(dataset_info["train_data_file_names_path"])
+    total_distance_error = 0
+    total_angle_error = 0
 
-    predictions = model.predict(X_test)
+    predictions = results_processor.get_result(X_test, transform=False)
 
-    for i, (prediction, y_test_sample, image_name) in enumerate(zip(predictions, y_test, file_names_test)):
-
-        print("Image:", image_name)
-
+    for i, (y_test, prediction, image_name) in enumerate(zip(y_test, predictions, file_names_test)):
+        if verbose:
+            print("Image:", image_name)
         image_path = os.path.join(dataset_info["image_directory"], image_name + ".jpg")
-
         image = cv2.imread(image_path)
 
-        annotate_image_with_result(image, prediction, (57, 127, 255))
-        annotate_image_with_result(image, y_test_sample, (255, 204, 52))
 
+        move_xy_right, move_angle_right, image = results_processor.process_result(prediction, image, move_right=True, color=(57, 127, 255))
+        move_xy_right_gt, move_angle_right_gt, image = results_processor.process_result(y_test, image, move_right=True, color=(255, 204, 52), ground_truth=True)
+        move_xy_left, move_angle_left, image = results_processor.process_result(prediction, image, move_right=False, color=(57, 127, 255))
+        move_xy_left_gt, move_angle_left_gt, image = results_processor.process_result(y_test, image, move_right=False, color=(255, 204, 52), ground_truth=True)
 
+        # get the sum of difference between the predicted and ground truth
+        dist_right = np.linalg.norm(np.asarray(move_xy_right) - np.asarray(move_xy_right_gt))
+        dist_left = np.linalg.norm(np.asarray(move_xy_left) - np.asarray(move_xy_left_gt))
+
+        # print the total
+        total_distance_error += dist_right + dist_left
+        total_angle_error += abs(move_angle_right - move_angle_right_gt) + abs(move_angle_left - move_angle_left_gt)
 
         # save the image
         cv2.imwrite(os.path.join(results_save_path, "result_{}.png".format(image_name.split(".")[0])), image)
 
-        # Set numpy to print 2 decimal places
-        np.set_printoptions(formatter={'float': lambda x: "{0:0.2f}".format(x)})
-        print("Prediction:", prediction, "Actual:", y_test_sample)
+        if verbose:
+            print("Total distance error: {}".format(dist_right + dist_left))
+            print("Total angle error: {}".format(abs(move_angle_right - move_angle_right_gt) + abs(move_angle_left - move_angle_left_gt)))
 
-def find_points_on_circle(center, radius, point, arc_length):
-    """
-    Finds two points on a circle that are a specified arc length away from a given point on the circle.
+            # Set numpy to print 2 decimal places
+            np.set_printoptions(formatter={'float': lambda x: "{0:0.2f}".format(x)})
+            print("Prediction:", prediction, "Actual:", y_test)
+    print("num corrections: {}".format(results_processor.counter))
+    average_distance_error = total_distance_error / len(X_test)
+    print("Average distance error: {}".format(average_distance_error))
+    average_angle_error = total_angle_error / len(X_test)
+    return average_distance_error, average_angle_error, results_processor.counter
 
-    Args:
-        center (tuple): The center of the circle as (x, y) pixel coordinates.
-        radius (float): The radius of the circle.
-        point (tuple): The point on the circle as (x, y) pixel coordinates.
-        arc_length (float): The arc length from the given point to the new points.
+def run_trial(note=None):
 
-    Returns:
-         Two tuples representing the coordinates of the new points on the circle.
-    """
-    radius_abs = abs(radius)
-    # Unpack the center and point coordinates
-    x_C, y_C = center
-    x_P, y_P = point
+    setup_train_and_val_data()
 
-    # Calculate the angle theta for the given arc length
-    theta = arc_length / radius_abs
+    dataset_info = get_dataset_info()
+    trials_directory = dataset_info["trials_directory"]
+    # get the current trial number
+    trial_number = len(os.listdir(trials_directory)) - 2
 
-    # Calculate the initial angle phi for the given point, adjusting for the image coordinate system
-    phi = math.atan2(-(y_P - y_C), x_P - x_C) # y difference is negated
+    # create the trial directory
+    trial_directory = os.path.join(trials_directory, str(trial_number))
+    # check if the directory already exists
+    if os.path.exists(trial_directory):
+        raise ValueError("The trial directory already exists.")
+    os.mkdir(trial_directory)
 
-    # Calculate new angles
-    phi_1 = phi + theta
-    phi_2 = phi - theta
+    # save the dataset info as a json file
+    dataset_info_path = os.path.join(trial_directory, "dataset_info.json")
+    with open(dataset_info_path, "w") as f:
+        json.dump(dataset_info, f)
 
-    # Find the new points Q1 and Q2
-    Q1 = (x_C + radius_abs * math.cos(phi_1), y_C - radius_abs * math.sin(phi_1)) # y is subtracted
-    Q2 = (x_C + radius_abs * math.cos(phi_2), y_C - radius_abs * math.sin(phi_2)) # y is subtracted
+    average_distance_errors = []
+    average_angle_errors = []
+    num_radius_corrections_list = []
+    # save the model
+    for i in range(dataset_info["num_testing_trials"]):
+        # create the image directory
+        image_directory = os.path.join(trial_directory, "images_{}".format(i))
+        os.mkdir(image_directory)
+        model_path = os.path.join(trial_directory, "model_{}.h5".format(i))
+        model, plt, train_loss, val_loss = train_model(num_epochs=dataset_info["num_epochs"], dataset_info=dataset_info)
+        model.save(model_path)
 
+        # save the plot
+        plot_path = os.path.join(trial_directory, "plot_{}.png".format(i))
+        plt.savefig(plot_path)
+        # save the training and validation loss
+        loss_path = os.path.join(trial_directory, "loss_{}.csv".format(i))
+        with open(loss_path, "w") as f:
+            writer = csv.writer(f)
+            writer.writerow(["train_loss", "val_loss"])
+            for train_loss, val_loss in zip(train_loss, val_loss):
+                writer.writerow([train_loss, val_loss])
 
-    return Q1, Q2
+        # test the model
+        average_distance_error, average_angle_error, num_radius_corrections = test_model(model=model, results_save_path=image_directory, verbose=False)
+        average_distance_errors.append(average_distance_error)
+        average_angle_errors.append(average_angle_error)
+        num_radius_corrections_list.append(num_radius_corrections)
 
-def get_move_destination(left_point, right_point, radius, arc_length, move_right):
-    circle_center = get_circle_center(left_point, right_point, radius)[0]
+    average_distance_error = sum(average_distance_errors) / len(average_distance_errors)
+    average_angle_error = sum(average_angle_errors) / len(average_angle_errors)
+    num_radius_corrections = sum(num_radius_corrections_list) / len(num_radius_corrections_list)
 
-    if move_right:
-        Q1, Q2 = find_points_on_circle(circle_center, radius, right_point, arc_length)
-        if Q1[0] > Q2[0]:
-            destination_point = Q1
-        else:
-            destination_point = Q2
+    # save a copy of the code used
+    code_directory = os.path.join(trial_directory, "code")
+    os.mkdir(code_directory)
+    file_names = ["dataset_info.py", "process_data.py", "process_results.py", "train_test_model.py", "scaler.pkl"]
+
+    for file_name in file_names:
+        package_directory = dataset_info["package_directory"]
+        file_name = os.path.join(package_directory, "src", file_name)
+        os.system("cp {} {}".format(file_name, code_directory))
+
+    results_path = os.path.join(trials_directory, "all_results.csv")
+
+    data_to_add = {"trial_number": [trial_number],
+                   "average_distance_error": [average_distance_error],
+                   "distance_errors": [average_distance_errors],
+                   "average_angle_error": [average_angle_error],
+                   "num_trials": [dataset_info["num_testing_trials"]],
+                   "num_epochs": [dataset_info["num_epochs"]],
+                   "batch_size": [dataset_info["batch_size"]],
+                   "model_version": [dataset_info["model_version"]],
+                   "enter_exit_multiplier": [dataset_info["enter_exit_multiplier"]],
+                   "num_time_steps_used": [dataset_info["time_steps_to_use"]],
+                   "num_features": [dataset_info["num_features"]],
+                   "num_units": [dataset_info["num_units"]],
+                   "loss_function": [dataset_info["loss_function"]],
+                   "optimizer": [dataset_info["optimizer"]],
+                   "activation_function": [dataset_info["activation_function"]],
+                   "removed_features": [dataset_info["non_feature_columns"]],
+                   "train_val_test_split": [dataset_info["train_val_test_split"]],
+                   "min_radius": [dataset_info["min_radius"]],
+                   "max_radius": [dataset_info["max_radius"]],
+                   "move_distance": [dataset_info["move_distance"]],
+                   "num_min_radius_corrections": [num_radius_corrections],
+                    }
+
+    if os.path.exists(results_path):
+        df = pd.read_csv(results_path)
+        df = pd.concat([df, pd.DataFrame.from_dict(data_to_add)], ignore_index=True)
+
     else:
-        Q1, Q2 = find_points_on_circle(circle_center, radius, left_point, arc_length)
-        if Q1[0] < Q2[0]:
-            destination_point = Q1
-        else:
-            destination_point = Q2
+        df = pd.DataFrame.from_dict(data_to_add)
 
-    dx = destination_point[0] - circle_center[0]
-    dy = -(destination_point[1] - circle_center[1])
-    # destination angle is the angle between the destination point and the circle center
-    if radius > 0:
-        destination_angle = math.degrees(math.atan2(dx, -dy))
-    else:
-        destination_angle = math.degrees(math.atan2(-dx, dy))
-    return destination_point, destination_angle
+    df.to_csv(results_path, index=False)
 
-def get_move_data(left_point, right_point, radius, arc_length, dataset_info, move_right=True):
+    # add a note about the trial
+    if note is None:
+        note = input("Enter a note about the trial: ")
 
-    destination_point, destination_angle = get_move_destination(left_point, right_point, radius, arc_length,
-                                                                move_right=move_right)
+    # check if new note is same as previous note
+    previous_note = None
+    if trial_number > 0:
+        prev_note_path = os.path.join(trials_directory, "notes", "note_{}.txt".format(trial_number - 1))
+        if os.path.exists(prev_note_path):
+            with open(os.path.join(trials_directory, "notes", "note_{}.txt".format(trial_number - 1)), "r") as f:
+                previous_note = f.read()
+    if note == previous_note:
+        note = input("Note is the same as previous note, enter a new note: ")
 
-    gripper_center_point = (dataset_info["center_of_gripper_pixel"], dataset_info["gripper_center_row"])
+    with open(os.path.join(trials_directory, "notes", "note_{}.txt".format(trial_number)), "w") as f:
+        f.write(note)
 
-    dx_pix = destination_point[0] - gripper_center_point[0]
-    dy_pix = -(destination_point[1] - gripper_center_point[1])
-    # d theta is the angle between
+    print("Average distance errors: {}".format(average_distance_errors))
+    print("Average distance error: {}".format(average_distance_error))
 
-    pix_per_mm = dataset_info["pixels_per_mm"]
-    dx_mm = dx_pix / pix_per_mm
-    dy_mm = dy_pix / pix_per_mm
-
-    return (dx_mm, dy_mm, destination_angle)
 
 
 
 if __name__ == "__main__":
-    model = train_model()
-    test_model(overwrite=True)
+    # model = train_model(num_epochs=100, run_setup=True)
+    # test_model(overwrite=True)
+    note = "trying a final model with most of the data"
+    run_trial(note)
+    # model_path = "../model_data/model_29_0.h5"
+    # model = keras.models.load_model(model_path)
+    # test_model(model=model, verbose=True)
 
 
 

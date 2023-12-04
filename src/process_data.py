@@ -418,7 +418,7 @@ def get_ground_truth_data():
 
 
 
-def setup_train_and_test_data():
+def setup_train_and_val_data():
     """ Gets the gripper data and saves it to a numpy array."""
     dataset_info = get_dataset_info()
 
@@ -444,37 +444,49 @@ def setup_train_and_test_data():
     X_train = normalized_data.reshape(og_shape)
 
     # Save the fitted scaler
-    with open('scaler.pkl', 'wb') as file:
+    scaler_path = dataset_info["scaler_path"]
+    with open(scaler_path, 'wb') as file:
         pickle.dump(scaler, file)
 
-    # get the ground truth data
+    # get the ground truth data and multiply the enter/exit points by the multiplier
     y_train = np.load(dataset_info["ground_truth_data_path"])
+    y_train[:, 1:] *= dataset_info["enter_exit_multiplier"]
 
-    num_test_samples = int(dataset_info['total_num_samples'] * dataset_info['train_val_test_split'][2])
+    file_names_all = np.array(dataset_info['gripper_file_names'])
+
+    num_val_samples = int(dataset_info['total_num_samples'] * dataset_info['train_val_test_split'][1])
 
     # set the random seed if necessary
     if dataset_info["random_seed"] is not None:
         np.random.seed(dataset_info["random_seed"])
 
-    # remove 5 random samples from X_train and y_train for testing
-    test_indices = np.random.choice(range(dataset_info["total_num_samples"]), size=num_test_samples, replace=False)
-    X_test = X_train[test_indices]
-    y_test = y_train[test_indices]
-    X_train = np.delete(X_train, test_indices, axis=0)
-    y_train = np.delete(y_train, test_indices, axis=0)
-    file_names_test = np.array(dataset_info['gripper_file_names'])[test_indices]
+    # shuffle the data
+    shuffled_indices = np.random.permutation(range(dataset_info["total_num_samples"]))
+    X_train = X_train[shuffled_indices]
+    y_train = y_train[shuffled_indices]
+    file_names_all = file_names_all[shuffled_indices]
+
+    # remove random samples from X_train and y_train for validation
+    val_indices = np.random.choice(range(dataset_info["total_num_samples"]), size=num_val_samples, replace=False)
+    X_val = X_train[val_indices]
+    y_val = y_train[val_indices]
+    X_train = np.delete(X_train, val_indices, axis=0)
+    y_train = np.delete(y_train, val_indices, axis=0)
+    file_names_val = file_names_all.copy()[val_indices]
+    file_names_train = np.delete(file_names_all, val_indices, axis=0)
 
     # remove .csv from file names
-    file_names_test = np.array([file_name.split('.')[0] for file_name in file_names_test])
+    file_names_val = np.array([file_name.split('.')[0] for file_name in file_names_val])
+    file_names_train = np.array([file_name.split('.')[0] for file_name in file_names_train])
 
     np.save(dataset_info["X_train_path"], X_train)
     np.save(dataset_info["y_train_path"], y_train)
-    np.save(dataset_info["X_test_path"], X_test)
-    np.save(dataset_info["y_test_path"], y_test)
-    np.save(dataset_info["test_data_file_names_path"], file_names_test)
+    np.save(dataset_info["X_val_path"], X_val)
+    np.save(dataset_info["y_val_path"], y_val)
+    np.save(dataset_info["val_data_file_names_path"], file_names_val)
+    np.save(dataset_info["train_data_file_names_path"], file_names_train)
 
 if __name__ == "__main__":
     # get_ground_truth_data()
-    setup_train_and_test_data()
-
+    setup_train_and_val_data()
 
