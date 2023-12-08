@@ -148,7 +148,21 @@ class ResultsProcessor:
         return predictions
 
 
-    def process_result(self, prediction, image, move_right=True, color=(0, 255, 0), ground_truth=False):
+    def process_result(self, prediction, image=None, move_right=True, color=(0, 255, 0), ground_truth=False):
+        """ Processes the result of the model to get the x, y, and angle movement needed, and annotates the image.
+
+        Args:
+            prediction (numpy.ndarray, dtype=float32, shape=(3)): The prediction of the model.
+            image (numpy.ndarray, dtype=uint8, shape=(480, 640, 3)): The image to annotate, or None if no image is given.
+            move_right (bool): Whether or not the gripper is moving right.
+            color (tuple): The color to make the annotations.
+            ground_truth (bool): Whether or not the prediction is ground truth data.
+
+        Returns:
+            move_xy (tuple): The x, y coordinates of the destination point in the gripper frame.
+            move_angle (float): The angle of the destination point in the gripper frame.
+            image (numpy.ndarray, dtype=uint8, shape=(480, 640, 3)): The annotated image, or None if no image is given.
+        """
 
         prediction = prediction.copy()
         prediction[1:] /= self.dataset_info["enter_exit_multiplier"]
@@ -173,41 +187,55 @@ class ResultsProcessor:
         move_xy, move_angle = self.get_move_command(circle_center_xy, left_exit_xy, right_exit_xy, radius_mm,
                                                     self.move_distance, move_right=move_right)
 
-        image = self.draw_curve(image, circle_center_xy, left_exit_xy, right_exit_xy, radius_mm, color)
+        if image is not None:
+            image = self.draw_curve(image, circle_center_xy, left_exit_xy, right_exit_xy, radius_mm, color)
 
-        # draw a dash at the right and left exit points on the image
-        cv2.line(image, right_exit_pixel_coords, (right_exit_pixel_coords[0] + 15, right_exit_pixel_coords[1]), color, 2)
-        cv2.line(image, left_exit_pixel_coords, (left_exit_pixel_coords[0] - 15, left_exit_pixel_coords[1]), color, 2)
+            # draw a circle at the right and left exit points on the image
+            cv2.circle(image, right_exit_pixel_coords, 5, color, -1)
+            cv2.circle(image, left_exit_pixel_coords, 5, color, -1)
 
-        # draw a circle at the center of the gripper
-        cv2.circle(image, (self.center_of_gripper_pixel, self.gripper_center_row), 5, color, -1)
+            # draw a circle at the center of the gripper
+            cv2.circle(image, (self.center_of_gripper_pixel, self.gripper_center_row), 5, color, -1)
 
-        # Draw a circle at the destination point
-        destination_point = gripper_to_image_transform(move_xy[0], move_xy[1], self.dataset_info)
-        cv2.circle(image, (int(destination_point[1]), int(destination_point[0])), 5, color, -1)
+            # Draw a circle at the destination point
+            destination_point = gripper_to_image_transform(move_xy[0], move_xy[1], self.dataset_info)
+            cv2.circle(image, (int(destination_point[1]), int(destination_point[0])), 5, color, -1)
 
-        # Draw an arrow at the destination point
-        arrow_angle = move_angle + 90
-        arrow_start = (int(destination_point[1]), int(destination_point[0]))
-        arrow_end_gripper_frame = (move_xy[0] + math.cos(math.radians(arrow_angle)) * 10,
-                                      move_xy[1] + math.sin(math.radians(arrow_angle)) * 10)
-        arrow_end = gripper_to_image_transform(arrow_end_gripper_frame[0], arrow_end_gripper_frame[1], self.dataset_info)
-        arrow_end = (int(arrow_end[1]), int(arrow_end[0]))
-        cv2.arrowedLine(image, arrow_start, arrow_end, color, 2)
+            # Draw an arrow at the destination point
+            arrow_angle = move_angle + 90
+            arrow_start = (int(destination_point[1]), int(destination_point[0]))
+            arrow_end_gripper_frame = (move_xy[0] + math.cos(math.radians(arrow_angle)) * 10,
+                                          move_xy[1] + math.sin(math.radians(arrow_angle)) * 10)
+            arrow_end = gripper_to_image_transform(arrow_end_gripper_frame[0], arrow_end_gripper_frame[1], self.dataset_info)
+            arrow_end = (int(arrow_end[1]), int(arrow_end[0]))
+            cv2.arrowedLine(image, arrow_start, arrow_end, color, 2)
 
         return move_xy, move_angle, image
 
-    def get_move_command(self, circle_center, left_point, right_point, radius, arc_length, move_right):
+    def get_move_command(self, circle_center, left_point, right_point, radius, move_distance, move_right):
+        """ Gets the x, y, and angle movement needed to move the gripper to the destination point.
 
+        Args:
+            circle_center (tuple): The center of the circle as (x, y) coordinates in the gripper frame.
+            left_point (tuple): The starting point of the curve as (x, y) coordinates in the gripper frame.
+            right_point (tuple): The ending point of the curve as (x, y) coordinates in the gripper frame.
+            radius (float): The radius of the curve in mm.
+            move_distance (float): The distance to move along the curve in mm.
+            move_right (bool): Set to True to move right, False to move left.
+
+        Returns:
+            move_xy (tuple): The x, y coordinates of the destination point relative ot the center of the gripper.
+            move_angle (float): The angle of the destination point in the gripper frame.
+        """
 
         if move_right:
-            point_1, point_2 = self.find_move_destination_points(circle_center, radius, right_point, arc_length)
+            point_1, point_2 = self.find_move_destination_points(circle_center, radius, right_point, move_distance)
             if point_1[0] > point_2[0]:
                 destination_point = point_1
             else:
                 destination_point = point_2
         else:
-            point_1, point_2 = self.find_move_destination_points(circle_center, radius, left_point, arc_length)
+            point_1, point_2 = self.find_move_destination_points(circle_center, radius, left_point, move_distance)
             if point_1[0] < point_2[0]:
                 destination_point = point_1
             else:

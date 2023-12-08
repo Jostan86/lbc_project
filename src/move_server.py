@@ -44,13 +44,18 @@ class MoveServer:
 
     def load_data_service(self, request):
 
-        # trial = int(request.gripper_data[0])
+        trial_num = str(int(request.gripper_data[0]))
         # sample = int(request.gripper_data[1])
         # path_to_data = "/home/jostan/Documents/lbc_datasets/lbc_dataset4/grip_data/{}_{}.csv".format(trial, sample)
         # path_to_image = "/home/jostan/Documents/lbc_datasets/lbc_dataset4/images/{}_{}.jpg".format(trial, sample)
 
-        path_to_data = self.operation_data_path
-        path_to_image = self.operation_image_path
+        path_to_data = "/media/jostan/portabits/kyle/swapped/" + trial_num + "_swapped.csv"
+        # path_to_data = "/media/jostan/portabits/kyle/swapped/0.csv"
+
+        path_to_image = "/media/jostan/portabits/kyle/" + trial_num + ".jpg"
+
+        # path_to_data = self.operation_data_path
+        # path_to_image = self.operation_image_path
         move_right = request.move_right
 
         gripper_data = pd.read_csv(path_to_data)

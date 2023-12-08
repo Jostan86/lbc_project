@@ -15,7 +15,7 @@ def get_dataset_info():
     package_directory = "/home/jostan/catkin_ws/src/pkgs_noetic/course_pkgs/lbc/lbc_project"
     dataset_info["operation_data_path"] = os.path.join(dataset_directory, "grip_data", "0_0.csv")
     dataset_info["operation_image_path"] = os.path.join(dataset_directory, "images", "0_0.jpg")
-    dataset_info["model_path"] = os.path.join(package_directory, "model_data", "model_29_0.h5")
+    dataset_info["model_path"] = os.path.join(package_directory, "model_data", "model_5_2.h5")
     dataset_info["scaler_path"] = os.path.join(package_directory, "model_data", "scaler.pkl")
     dataset_info["move_distance"] = 10  # mm
     dataset_info["min_radius"] = 40  # mm
@@ -28,7 +28,7 @@ def get_dataset_info():
     dataset_info["num_epochs"] = 200
     dataset_info["batch_size"] = 10
     dataset_info["model_version"] = 1
-    dataset_info["num_testing_trials"] = 3
+    dataset_info["num_testing_trials"] = 6
     dataset_info["activation_function"] = "relu"
     dataset_info["loss_function"] = "mean_absolute_error"
     dataset_info["optimizer"] = "adam"
@@ -44,7 +44,7 @@ def get_dataset_info():
     non_feature_columns5 = ['0_friction_est', '1_friction_est', '0_target_grip_force', '0_is_ref_loaded',
                             '0_is_sd_active', '1_target_grip_force', '1_is_ref_loaded',
                             '1_is_sd_active',
-                            # 'gripper_pos'
+                            'gripper_pos'
                             ]
 
     non_feature_columns = non_feature_columns2 + non_feature_columns4 + non_feature_columns5
@@ -120,7 +120,7 @@ def get_dataset_info():
     dataset_info["gripper_center_row"] = 348 #375
 
     # Seed to use to keep consistent results, can be set to None to not set a seed
-    dataset_info["random_seed"] = 45
+    dataset_info["random_seed"] = 42
 
     return dataset_info
 
